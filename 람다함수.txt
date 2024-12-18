@@ -1,0 +1,67 @@
+import json
+import boto3
+
+# SageMaker 및 IoT 클라이언트 초기화
+sagemaker_runtime = boto3.client('sagemaker-runtime')
+iot_client = boto3.client('iot-data')
+
+# 엔드포인트 이름
+ENDPOINT_NAME = ""
+
+# MQTT 주제
+MQTT_TOPIC = ""
+
+def lambda_handler(event, context):
+    try:
+        # 좌표 데이터 추출 및 float로 변환
+        latitude = float(event.get("latitude"))
+        longitude = float(event.get("longitude"))
+        
+        if not latitude or not longitude:
+            return {
+                "statusCode": 400,
+                "body": json.dumps("Invalid input data")
+            }
+        
+        # SageMaker 엔드포인트에 요청
+        payload = json.dumps({
+            "latitude": str(latitude),  # 문자열로 변환
+            "longitude": str(longitude)  # 문자열로 변환
+        })
+        
+        response = sagemaker_runtime.invoke_endpoint(
+            EndpointName=ENDPOINT_NAME,
+            ContentType="application/json",
+            Body=payload
+        )
+        
+        # 예측 결과 추출
+        result = json.loads(response['Body'].read().decode())
+        
+        # MQTT로 피드백 전송
+        iot_client.publish(
+            topic=MQTT_TOPIC,
+            qos=1,
+            payload=json.dumps({
+                "latitude": float(latitude),
+                "longitude": float(longitude),
+                "prediction": result["prediction"],
+                "distance": result["distance"]
+            })
+        )
+        
+        return {
+            "statusCode": 200,
+            "body": json.dumps("Prediction sent to MQTT")
+        }
+        
+    except ValueError as e:
+        return {
+            "statusCode": 400,
+            "body": json.dumps(f"Error processing coordinates: {str(e)}")
+        }
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": json.dumps(f"Internal error: {str(e)}")
+        }
